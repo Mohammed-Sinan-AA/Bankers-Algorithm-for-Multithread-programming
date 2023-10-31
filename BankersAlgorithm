@@ -1,0 +1,139 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <stdbool.h>
+
+#define MAX_RESOURCES 100
+#define MAX_PROCESSES 100
+
+int available[MAX_RESOURCES];
+int maximum[MAX_PROCESSES][MAX_RESOURCES];
+int allocation[MAX_PROCESSES][MAX_RESOURCES];
+int need[MAX_PROCESSES][MAX_RESOURCES];
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+bool isSafeState(int process_id) {
+  int work[MAX_RESOURCES];
+  bool finish[MAX_PROCESSES] = { false };
+
+  for (int i = 0; i < MAX_RESOURCES; i++) {
+    work[i] = available[i];
+  }
+
+  int count = 0;
+  while (count < MAX_PROCESSES) {
+    bool found = false;
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+      if (!finish[i]) {
+        bool can_allocate = true;
+        for (int j = 0; j < MAX_RESOURCES; j++) {
+          if (need[i][j] > work[j]) {
+            can_allocate = false;
+            break;
+          }
+        }
+        if (can_allocate) {
+          for (int j = 0; j < MAX_RESOURCES; j++) {
+            work[j] += allocation[i][j];
+          }
+          finish[i] = true;
+          found = true;
+        }
+      }
+    }
+    if (!found) {
+      return false;
+    }
+    count++;
+  }
+  return true;
+}
+
+void requestResources(int process_id) {
+  int request[MAX_RESOURCES];
+  for (int i = 0; i < MAX_RESOURCES; i++) {
+    request[i] = rand() % (need[process_id][i] + 1);
+  }
+
+  pthread_mutex_lock(&mutex);
+
+  bool valid_request = true;
+  for (int i = 0; i < MAX_RESOURCES; i++) {
+    if (request[i] > available[i]) {
+      valid_request = false;
+      break;
+    }
+  }
+
+  if (valid_request && isSafeState(process_id)) {
+    for (int i = 0; i < MAX_RESOURCES; i++) {
+      allocation[process_id][i] += request[i];
+      need[process_id][i] -= request[i];
+      available[i] -= request[i];
+    }
+    printf("Process %d requested resources. Request granted.\n", process_id);
+  } else {
+    printf("Process %d requested resources. Request denied.\n", process_id);
+  }
+  pthread_mutex_unlock(&mutex);
+}
+
+void releaseResources(int process_id) {
+  int release[MAX_RESOURCES];
+  for (int i = 0; i < MAX_RESOURCES; i++) {
+    release[i] = rand() % (allocation[process_id][i] + 1);
+  }
+
+  pthread_mutex_lock(&mutex);
+
+  for (int i = 0; i < MAX_RESOURCES; i++) {
+    allocation[process_id][i] -= release[i];
+    need[process_id][i] += release[i];
+    available[i] += release[i];
+  }
+  printf("Process %d released resources.\n", process_id);
+
+  pthread_mutex_unlock(&mutex);
+}
+
+void *processThread(void *arg) {
+  int process_id = *(int *)arg;
+
+  requestResources(process_id);
+  releaseResources(process_id);
+
+  return NULL;
+}
+
+int main() {
+  int num_processes, num_resources;
+  printf("Enter the number of processes: ");
+  scanf("%d", &num_processes);
+  printf("Enter the number of resources: ");
+  scanf("%d", &num_resources);
+
+  if (num_processes > MAX_PROCESSES || num_resources > MAX_RESOURCES) {
+    printf("Invalid input. Maximum number of processes: %d, Maximum number of resources: %d\n", MAX_PROCESSES, MAX_RESOURCES);
+    return 1;
+  }
+
+  pthread_t threads[MAX_PROCESSES];
+  int process_ids[MAX_PROCESSES];
+
+  for (int i = 0; i < num_processes; i++) {
+    process_ids[i] = i;
+    if (pthread_create(&threads[i], NULL, processThread, &process_ids[i]) != 0) {
+      perror("Thread creation failed");
+      return 1;
+    }
+  }
+
+  for (int i = 0; i < num_processes; i++) {
+    if (pthread_join(threads[i], NULL) != 0) {
+      perror("Thread join failed");
+      return 1;
+    }
+  }
+
+  return 0;
+}
